@@ -1,0 +1,1030 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ricochet Tanks</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #1d2029; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+  .hud { position: fixed; pointer-events: none; text-shadow: 0 2px 3px #000b; }
+  #cards { top: max(8px, env(safe-area-inset-top)); left: 0; right: 0; display: flex; justify-content: center; gap: 8px; padding: 0 8px; }
+  .pc { min-width: 66px; max-width: 120px; padding: 3px 8px 4px; border-radius: 9px; background: #000a; border-bottom: 3px solid var(--c); text-align: center; font-size: 12px; line-height: 1.25; }
+  .pc small { display: block; font-size: 12px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--c); }
+  .pc .w { color: #ffd166; letter-spacing: 1px; font-size: 11px; } .pc .pw { margin-left: 4px; }
+  .pc.out { opacity: .35; } .pc.me { background: #33384add; }
+  #msg { top: 36%; left: 0; right: 0; text-align: center; font: 900 46px/1 system-ui, sans-serif; letter-spacing: .04em; color: #ffd166; text-shadow: 3px 3px 0 #3a1d00, 0 0 18px #000a; }
+  #msg small { display: block; margin-top: 10px; font: 800 16px system-ui, sans-serif; letter-spacing: 0; color: #fff; text-shadow: 2px 2px 0 #000; }
+  #hint { bottom: calc(max(6px, env(safe-area-inset-bottom)) + 22px); left: 0; right: 0; padding: 0 16px; text-align: center; font-size: 13px; }
+  #net { bottom: max(4px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; font-size: 12px; opacity: .75; }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #13151cb0; }
+  #over[hidden], #fire[hidden], .stick[hidden] { display: none; }
+  .card { box-sizing: border-box; width: min(380px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #282c38; border: 2px solid #ffffff26; text-align: center; }
+  .card h2 { margin: 0 0 4px; font-size: 28px; color: #ffd166; } .card h3 { margin: 14px 0 4px; font-size: 13px; color: #8fd8ff; text-align: left; }
+  .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; }
+  .card li span { float: right; font-variant-numeric: tabular-nums; opacity: .85; } .card li.me { color: #ffd166; font-weight: 700; }
+  .card p { margin: 10px 0 0; font-size: 13px; opacity: .75; }
+  button.go { width: 100%; min-height: 48px; margin-top: 16px; border: 0; border-radius: 12px; background: #ffd166; color: #3a2400; font: 800 17px system-ui, sans-serif; cursor: pointer; }
+  #fire { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 30px); width: 96px; height: 96px; border-radius: 50%;
+          border: 3px solid #ffffff88; background: #ff5d5d66; color: #fff; font: 900 16px system-ui, sans-serif; touch-action: none; }
+  #fire.on { filter: brightness(1.7); }
+  .stick { position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 2px solid #ffffff55; background: #ffffff12; pointer-events: none; }
+  .stick i { position: absolute; left: 34px; top: 34px; width: 52px; height: 52px; border-radius: 50%; background: #ffffff70; }
+  #stickHome { opacity: .45; }
+  @media (pointer: coarse) and (orientation: portrait) { #hint { bottom: calc(max(6px, env(safe-area-inset-bottom)) + 232px); } }
+  @media (max-width: 640px) { #msg { font-size: 36px; } .pc { min-width: 0; padding: 2px 6px 4px; } #cards { gap: 5px; padding: 0 5px; } }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud" id="cards"></div>
+<div class="hud" id="msg"></div>
+<div class="hud" id="hint"></div>
+<div class="hud" id="net">Connecting…</div>
+<div class="stick" id="stickHome" hidden><i></i></div>
+<div class="stick" id="stick" hidden><i></i></div>
+<button id="fire" hidden>FIRE</button>
+<div id="over" hidden><div class="card">
+  <h2 id="overTitle"></h2><div id="overSub"></div>
+  <h3>This match</h3><ol id="results"></ol>
+  <h3>Most match wins</h3><ol id="board"><li>Loading…</li></ol>
+  <button class="go" id="again">Play again</button><p id="next"></p>
+</div></div>
+<script>
+/* ═══ RICOCHET TANKS · a Multiplayer Agent starter ════════════════════════════════════
+ * Tiny tanks in a maze. Shells bounce off the walls (and can come back for you). Last tank
+ * rolling takes the round, every round is a new maze, first to 5 wins the match.
+ * Versus, 2–6 players; bots fill empty seats.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ rounds, tank speed, shells, power-ups, bots
+ *   MAZE .......... the seeded maze, its walls, and the ray cast every shell flies along
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   TANKS ......... driving, bumping walls, firing (the same code for people and bots)
+ *   SHELLS ........ shells and lasers in flight on every screen, and who they hit
+ *   BOTS .......... the bot brain: drive the maze, line up straight or bank shots, dodge
+ *   MATCH (HOST) .. seats, rounds, who is out, the winner, power-ups. Only the host writes these.
+ *   ME ............ my controls, my shots, picking up power-ups, my own death
+ *   VIEWS ......... everyone else, eased toward their latest state
+ *   DRAW .......... floor, walls, tread marks, tanks, shells, lasers, sparks
+ *   HUD & RESULTS . player cards, banners, results, leaderboard, sounds
+ *   INPUT ......... keyboard, and a thumb stick with a Fire button on touch
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code):
+ *   - Each tank writes its OWN entity: `p` (one packed JSON field: round, position, angle,
+ *     power-up, shield, out + who got it) about 15 times a second, `hb` (heartbeat) once a
+ *     second, `n`/`c` (name, color) once.
+ *   - Shots are events: "shot" {by, r, s: [[id, x, y, angle, kind]]}. A shell's whole bouncing
+ *     path follows from where it started and the maze, so every screen flies the same shell.
+ *   - A HIT IS DECIDED BY THE ONE IT HITS: only you check shells against your own tank. Hit with
+ *     a shield up, the shield pops; otherwise you're out and your `p` says who did it. Either
+ *     way you send "pop" {id} so the shell vanishes everywhere. On other screens a shell just
+ *     stops at whatever tank it touches. (The host decides this for bots.)
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s),
+ *     worked out every frame. Only the host writes the shared fields:
+ *       `match` {id, v, phase: intro|fight|end|over, round, seed, seats, names, wins, kills,
+ *                out, ko, startAt, endsAt, lastAt, itemAt, rw, winner}
+ *       `items` {r, a: [[id, x, y, kind]]}: power-ups lying in the maze
+ *       `bots`  the bots' tanks, about 10 times a second
+ *     The maze and the spawn points come from match.seed, so it never sends the maze itself.
+ *   - Intents to the host: "pick" {id, r} (I drove over a power-up), "again" (Play again).
+ *     The host answers "got" {to, k, r}: the power-up is yours.
+ *   - A host whose tab froze or went to the background (a frame gap over 1s) stops hosting, waits
+ *     700ms for fresh state, then adopts it like a newly elected host: it never writes its stale copy.
+ *   - Someone who joins mid-round watches, then takes a bot's seat at the next round.
+ *   - ?attract plays offline with five bots (the preview video is recorded from it).
+ *   - Leaderboard "tank-wins": +1 for every match you win, shown on the results card.
+ */
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  winRounds: 5,          // round wins to take the match
+  seats: 4,              // bots fill the match up to this many tanks (people can push it to maxSeats)
+  maxSeats: 6,           // most tanks in one match
+  introMs: 1800,         // "ROUND 2" before the tanks can move
+  roundMs: 75000,        // a round still going after this long is a draw
+  lastStandMs: 1400,     // once one tank is left, wait this long (a shell may still be bouncing) before calling it
+  endMs: 2400,           // the round-winner banner
+  resultsMs: 9000,       // the results card before the next match
+  seatGraceMs: 6000,     // a player silent this long is out of the round (a bot takes the seat next round)
+  cols: 9, rows: 6,      // maze size in cells
+  cell: 80,              // px per cell (the world is cols*cell × rows*cell)
+  openness: 0.32,        // share of inner walls knocked out after the maze is carved (more = more open)
+  tankSpeed: 125,        // px/s forward (backing up is 65% of this)
+  turnSpeed: 3.6,        // rad/s
+  tankR: 14,             // tank radius
+  shellSpeed: 235,       // px/s
+  shellLife: 6,          // seconds a shell keeps bouncing
+  shellR: 3.5,           // shell radius
+  maxShells: 5,          // a tank's shells on screen at once
+  fireEvery: 0.22,       // seconds between shots
+  selfGrace: 30,         // px a shell must travel before it can hit the tank that fired it
+  laserLen: 1500,        // px a laser beam reaches, bounces included
+  laserMs: 380,          // how long the beam shows (it hits in the first 120ms)
+  tripleSpread: 0.2,     // rad between the three shells of a triple shot
+  tripleShots: 3,        // triple shots per pick-up
+  shieldMs: 10000,       // a shield lasts this long, or until it stops one hit
+  itemFirstMs: 5000,     // the first power-up appears this long into a round ...
+  itemEveryMs: 7000,     // ... then another about this often
+  maxItems: 3,           // power-ups lying around at once
+  botAim: 0.07,          // rad of wobble in a bot's aim
+  botReact: 0.45,        // seconds a bot takes to fire once lined up
+  botBank: 0.4,          // chance a bot looks for a bank shot when it checks
+  botDodge: 0.5,         // chance a bot backs away from a shell about to hit it
+  board: "tank-wins",    // leaderboard name
+};
+// Power-ups: the letter is what lies in the maze and what a tank carries.
+const POWERS = {
+  L: { name: "Laser", color: "#ff3df2" },         // one shot: an instant beam that bounces
+  T: { name: "Triple", color: "#ffb02e" },        // the next 3 shots fire three shells each
+  S: { name: "Shield", color: "#36d6ff" },        // stops one hit
+};
+const BOT_NAMES = ["Rusty", "Bolt", "Tread", "Sarge", "Dent", "Clank", "Pinball", "Boomer"];
+const COLORS = ["#ff5d5d", "#4dabff", "#ffd23f", "#3ddc97", "#c77dff", "#ff9f43", "#f78fb3", "#9ad1d4"];
+
+// ── MAZE ────────────────────────────────────────────────────────────────────────────
+// A maze is carved from a seed (the same seed gives every screen the same maze), then some inner
+// walls are knocked out so there are loops to circle round. Walls are thin rectangles on the cell
+// lines; shells fly along a path ray-cast against them.
+if (new URLSearchParams(location.search).has("attract")) Object.assign(CONFIG, { cols: 7, rows: 4 }); // the preview video uses a smaller maze: bigger tanks on screen
+const CS = CONFIG.cell, COLS = CONFIG.cols, ROWS = CONFIG.rows, WW = COLS * CS, WH = ROWS * CS, WT = 8;
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+let maze = null;
+/** h[r][c] = wall above cell (c, r); v[r][c] = wall left of cell (c, r). */
+function makeMaze(seed) {
+  const rnd = mulberry32(seed);
+  const h = Array.from({ length: ROWS + 1 }, () => Array(COLS).fill(true)), v = Array.from({ length: ROWS }, () => Array(COLS + 1).fill(true));
+  const seen = new Set(), stack = [[Math.floor(rnd() * COLS), Math.floor(rnd() * ROWS)]];
+  seen.add(stack[0].join());
+  while (stack.length) { // carve: a random walk that backs up at dead ends
+    const [c, r] = stack[stack.length - 1];
+    const next = [[c + 1, r], [c - 1, r], [c, r + 1], [c, r - 1]].filter(([x, y]) => x >= 0 && y >= 0 && x < COLS && y < ROWS && !seen.has(x + "," + y));
+    if (!next.length) { stack.pop(); continue; }
+    const [x, y] = next[Math.floor(rnd() * next.length)];
+    if (x !== c) v[r][Math.max(x, c)] = false; else h[Math.max(y, r)][c] = false;
+    seen.add(x + "," + y); stack.push([x, y]);
+  }
+  for (let r = 1; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (rnd() < CONFIG.openness) h[r][c] = false;
+  for (let r = 0; r < ROWS; r++) for (let c = 1; c < COLS; c++) if (rnd() < CONFIG.openness) v[r][c] = false;
+  const rects = [];
+  for (let r = 0; r <= ROWS; r++) for (let c = 0; c < COLS; c++) if (h[r][c]) rects.push({ x0: c * CS - WT / 2, y0: r * CS - WT / 2, x1: (c + 1) * CS + WT / 2, y1: r * CS + WT / 2 });
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c <= COLS; c++) if (v[r][c]) rects.push({ x0: c * CS - WT / 2, y0: r * CS - WT / 2, x1: c * CS + WT / 2, y1: (r + 1) * CS + WT / 2 });
+  return { seed, h, v, rects, spawns: spawnCells(seed) };
+}
+function useMaze(seed) { if (maze && maze.seed === seed) return; maze = makeMaze(seed); renderFloor(); treads.length = scorch.length = 0; }
+/** Can you drive straight from cell (c, r) to its neighbour (c + dc, r + dr)? */
+function passable(c, r, dc, dr) {
+  const x = c + dc, y = r + dr;
+  if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
+  return dc ? !maze.v[r][Math.max(x, c)] : !maze.h[Math.max(y, r)][c];
+}
+/** Spawn cells for up to maxSeats tanks, spread out across the maze (from the seed). */
+function spawnCells(seed) {
+  const rnd = mulberry32(seed ^ 0x5bd1e995), out = [[Math.floor(rnd() * COLS), Math.floor(rnd() * ROWS)]];
+  while (out.length < CONFIG.maxSeats) {
+    let best = null, bd = -1;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const d = Math.min(...out.map(([x, y]) => Math.abs(x - c) + Math.abs(y - r))) + rnd() * 1.5;
+      if (d > bd) { bd = d; best = [c, r]; }
+    }
+    out.push(best);
+  }
+  return out.map(([c, r]) => ({ x: (c + 0.5) * CS, y: (r + 0.5) * CS, a: Math.round(Math.atan2(WH / 2 - (r + 0.5) * CS, WW / 2 - (c + 0.5) * CS) / (Math.PI / 2)) * (Math.PI / 2) }));
+}
+/** The path of something flying from (x, y) at angle a for len px, bouncing off walls.
+ *  Returns points [{x, y, d}] where d is the distance flown when it gets there. */
+function castPath(x, y, a, len, rad, maxBounce = 60) {
+  let dx = Math.cos(a), dy = Math.sin(a), d = 0;
+  const pts = [{ x, y, d: 0 }];
+  for (let b = 0; b <= maxBounce && d < len; b++) {
+    let best = len - d, axis = "";
+    for (const w of maze.rects) {
+      const x0 = w.x0 - rad, x1 = w.x1 + rad, y0 = w.y0 - rad, y1 = w.y1 + rad;
+      let tx0 = -Infinity, tx1 = Infinity, ty0 = -Infinity, ty1 = Infinity;
+      if (dx) { const a1 = (x0 - x) / dx, a2 = (x1 - x) / dx; tx0 = Math.min(a1, a2); tx1 = Math.max(a1, a2); } else if (x <= x0 || x >= x1) continue;
+      if (dy) { const a1 = (y0 - y) / dy, a2 = (y1 - y) / dy; ty0 = Math.min(a1, a2); ty1 = Math.max(a1, a2); } else if (y <= y0 || y >= y1) continue;
+      const tin = Math.max(tx0, ty0), tout = Math.min(tx1, ty1);
+      if (tin >= -1e-6 && tin <= tout && tout > 1e-6 && tin < best) { best = Math.max(0, tin); axis = tx0 > ty0 ? "x" : "y"; }
+    }
+    x += dx * best; y += dy * best; d += best;
+    pts.push({ x, y, d });
+    if (!axis) break;
+    if (axis === "x") dx = -dx; else dy = -dy;
+  }
+  return pts;
+}
+/** Where a path is after flying s px. */
+function pointAt(pts, s) {
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    if (s <= b.d) { const k = b.d > a.d ? (s - a.d) / (b.d - a.d) : 0; return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }; }
+  }
+  return pts[pts.length - 1];
+}
+/** Push a circle out of every wall it overlaps. */
+function collideWalls(o, rad) {
+  for (let pass = 0; pass < 2; pass++) for (const w of maze.rects) {
+    const cx = Math.max(w.x0, Math.min(w.x1, o.x)), cy = Math.max(w.y0, Math.min(w.y1, o.y)), dx = o.x - cx, dy = o.y - cy, d = Math.hypot(dx, dy);
+    if (d >= rad) continue;
+    if (d > 0.001) { o.x = cx + dx / d * rad; o.y = cy + dy / d * rad; }
+    else { o.x += o.x < (w.x0 + w.x1) / 2 ? -(o.x - w.x0 + rad) : w.x1 - o.x + rad; } // centre inside the wall: out the nearest side
+  }
+  o.x = Math.max(rad, Math.min(WW - rad, o.x)); o.y = Math.max(rad, Math.min(WH - rad, o.y));
+}
+/** True when nothing but floor lies between two points (for line of sight). */
+function clearLine(ax, ay, bx, by) {
+  const n = Math.ceil(Math.hypot(bx - ax, by - ay) / 6);
+  for (let i = 1; i < n; i++) { const x = ax + (bx - ax) * i / n, y = ay + (by - ay) * i / n; if (maze.rects.some((w) => x > w.x0 && x < w.x1 && y > w.y0 && y < w.y1)) return false; }
+  return true;
+}
+const cellOf = (x, y) => [Math.max(0, Math.min(COLS - 1, Math.floor(x / CS))), Math.max(0, Math.min(ROWS - 1, Math.floor(y / CS)))];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'ricochet-tanks',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const ATTRACT = new URLSearchParams(location.search).has("attract");
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+const parsed = new Map();
+/** A JSON value from state, parsed once per change (read-only: never mutate what this returns). */
+function parseOnce(key, raw, fallback) {
+  const c = parsed.get(key);
+  if (c && c.raw === raw) return c.v;
+  const v = parse(raw, fallback); parsed.set(key, { raw, v }); return v;
+}
+let net = null, S = { entities: { players: {} }, shared: {} };
+const seenHb = new Map();
+/** Players whose heartbeat moved in the last 3s (plus us), sorted by sessionId. */
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+const isHost = () => livePlayers()[0] === net.sessionId;
+/** Still in the room and heard from within the seat grace time. */
+const stillHere = (id) => id === net.sessionId || (!!S.entities.players[id] && performance.now() - (seenHb.get(id)?.at ?? -1e9) < CONFIG.seatGraceMs);
+
+// ── TANKS ───────────────────────────────────────────────────────────────────────────
+const TR = CONFIG.tankR;
+function newTank(id) {
+  return { id, name: "", color: "#ccc", x: WW / 2, y: WH / 2, a: 0, speed: 0, cd: 0, shots: 0, shotAt: -1e9, pw: "", pn: 0, shieldUntil: 0, sd: 0, dead: 0, kb: "", r: "", treadAt: 0, tx: 0, ty: 0 };
+}
+/** Put a tank on its spawn point for this round. */
+function resetTank(t, m, seat) {
+  useMaze(m.seed);
+  const sp = maze.spawns[seat % maze.spawns.length];
+  Object.assign(t, { x: sp.x, y: sp.y, a: sp.a, speed: 0, cd: 0.4, pw: "", pn: 0, shieldUntil: 0, sd: 0, dead: 0, kb: "", r: roundKey(m), tx: sp.x, ty: sp.y });
+}
+/** One step of a tank. ctl = { turn, drive: -1..1 } (tank controls), or { dir, mag } (point the way to go: thumb stick and bots). */
+function stepTank(t, ctl, dt, others) {
+  t.cd -= dt;
+  let drive = ctl.drive || 0;
+  if (ctl.dir != null) {
+    const diff = Math.atan2(Math.sin(ctl.dir - t.a), Math.cos(ctl.dir - t.a));
+    t.a += Math.max(-CONFIG.turnSpeed * dt, Math.min(CONFIG.turnSpeed * dt, diff));
+    drive = (ctl.mag || 0) * Math.max(0, Math.cos(diff)) ** 2;
+  } else t.a += (ctl.turn || 0) * CONFIG.turnSpeed * dt;
+  t.a = Math.atan2(Math.sin(t.a), Math.cos(t.a));
+  const want = drive * CONFIG.tankSpeed * (drive < 0 ? 0.65 : 1);
+  t.speed += (want - t.speed) * Math.min(1, dt * 12);
+  const ox = t.x, oy = t.y;
+  t.x += Math.cos(t.a) * t.speed * dt; t.y += Math.sin(t.a) * t.speed * dt;
+  for (const o of others) { // tanks shove each other apart (each screen moves only its own)
+    if (o === t || o.dead) continue;
+    const dx = t.x - o.x, dy = t.y - o.y, d = Math.hypot(dx, dy);
+    if (d < TR * 2 && d > 0.01) { t.x = o.x + dx / d * TR * 2; t.y = o.y + dy / d * TR * 2; }
+  }
+  collideWalls(t, TR);
+  const moved = Math.hypot(t.x - t.tx, t.y - t.ty);
+  if (moved > 7) { treads.push({ x: t.x, y: t.y, a: t.a, at: performance.now() }); if (treads.length > 700) treads.shift(); t.tx = t.x; t.ty = t.y; }
+  if (Math.hypot(t.x - ox, t.y - oy) < 0.01 && Math.abs(want) > 1) t.speed *= 0.5;
+}
+/** Fire whatever the tank has loaded. Returns the shells to send, or null. */
+function fire(t, key) {
+  if (t.cd > 0 || t.dead) return null;
+  const mine = shells.filter((s) => s.by === t.id && !s.gone && s.k !== "L").length;
+  if (t.pw !== "L" && mine >= CONFIG.maxShells) { t.cd = 0.15; return null; }
+  t.cd = CONFIG.fireEvery; t.shots++; t.shotAt = performance.now();
+  const x = +t.x.toFixed(1), y = +t.y.toFixed(1), a = +t.a.toFixed(3), base = t.id.slice(0, 5) + "." + t.shots;
+  let list;
+  if (t.pw === "L") list = [[base, x, y, a, "L"]];
+  else if (t.pw === "T") list = [-1, 0, 1].map((k) => [base + "abc"[k + 1], x, y, +(a + k * CONFIG.tripleSpread).toFixed(3), "n"]);
+  else list = [[base, x, y, a, "n"]];
+  if (t.pw === "L" || t.pw === "T") { t.pn--; if (t.pn <= 0) { t.pw = ""; t.pn = 0; } }
+  for (const s of list) addShell(s, t.id, key);
+  return list;
+}
+/** Out: by is who fired the shell that did it ("" when they left). */
+function kill(t, by) {
+  const m = match();
+  if (t.dead || !m || m.phase !== "fight") return;
+  Object.assign(t, { dead: 1, kb: by || "" });
+  boomFx(t.x, t.y, t.color);
+  if (t === me) { shake = 10; sfx("die"); publish(true); }
+}
+/** A shell touched t (on the screen that decides for t): the shield takes it, or t is out. */
+function takeHit(t, s, x, y) {
+  s.gone = true;
+  net.send("pop", { id: s.id, x: Math.round(x), y: Math.round(y) });
+  if (t.shieldUntil > Date.now()) { t.shieldUntil = 0; t.sd = 0; rings.push({ x: t.x, y: t.y, t: 0, color: POWERS.S.color }); spark(x, y, POWERS.S.color, 14); if (t === me) { sfx("shield"); publish(true); } return; }
+  kill(t, s.by);
+}
+
+// ── SHELLS ──────────────────────────────────────────────────────────────────────────
+// `shells` = shells and laser beams on this screen. Each one carries its whole path, so its
+// position is just "how far it has flown", which every screen agrees on.
+const shells = [], bits = [], rings = [], treads = [], scorch = [];
+function addShell([id, x, y, a, k], by, key) {
+  if (shells.some((s) => s.id === id) || !maze) return;
+  const laser = k === "L", pts = castPath(+x, +y, +a, laser ? CONFIG.laserLen : CONFIG.shellSpeed * CONFIG.shellLife, laser ? 1 : CONFIG.shellR);
+  shells.push({ id: String(id), by: String(by), k: laser ? "L" : "n", pts, born: performance.now(), r: key, s: 0, gone: false, color: colorOf(by), bounces: pts.length - 2 });
+  if (laser) { sfx("laser"); shake = Math.max(shake, 4); } else { sfx("shot"); flash.push({ x: +x + Math.cos(+a) * 18, y: +y + Math.sin(+a) * 18, t: 0 }); }
+}
+/** Move every shell to where it should be now, and check the tanks this screen decides for. */
+function stepShells(m) {
+  const now = performance.now(), key = roundKey(m), all = tanks();
+  for (let i = shells.length - 1; i >= 0; i--) {
+    const sh = shells[i];
+    if (sh.r !== key) { shells.splice(i, 1); continue; }
+    const age = (now - sh.born) / 1000;
+    if (sh.k === "L") { // a beam: lethal at once, gone soon after
+      if (!sh.gone && age < 0.12) for (const t of all) if (decides(t) && !t.dead && laserHits(sh, t)) takeHit(t, sh, t.x, t.y);
+      if (age * 1000 > CONFIG.laserMs) shells.splice(i, 1);
+      continue;
+    }
+    const s0 = sh.s, s1 = Math.min(age * CONFIG.shellSpeed, sh.pts[sh.pts.length - 1].d);
+    sh.s = s1;
+    for (let k = 1; k < sh.pts.length - 1; k++) if (sh.pts[k].d > s0 && sh.pts[k].d <= s1) { spark(sh.pts[k].x, sh.pts[k].y, "#fff3c4", 3); if (k <= 3) sfx("tick"); }
+    if (s1 >= sh.pts[sh.pts.length - 1].d - 0.01 || sh.gone) { if (!sh.gone) puff(pointAt(sh.pts, s1)); shells.splice(i, 1); continue; }
+    const p0 = pointAt(sh.pts, s0), p1 = pointAt(sh.pts, s1), pm = pointAt(sh.pts, (s0 + s1) / 2);
+    for (const t of all) {
+      if (t.dead || (t.id === sh.by && s1 < CONFIG.selfGrace)) continue;
+      const r2 = (TR + CONFIG.shellR - 1) ** 2, hit = [p0, pm, p1].find((p) => (p.x - t.x) ** 2 + (p.y - t.y) ** 2 < r2);
+      if (!hit) continue;
+      if (decides(t)) takeHit(t, sh, hit.x, hit.y);
+      else { sh.gone = true; spark(hit.x, hit.y, "#fff", 6); } // someone else's tank: their screen decides
+      break;
+    }
+  }
+}
+/** Does this screen decide hits for tank t? (me; on the host, the bots too) */
+const decides = (t) => t === me || (host.acting && host.bots.get(t.id) === t);
+function laserHits(sh, t) {
+  for (let k = 1; k < sh.pts.length; k++) {
+    const a = sh.pts[k - 1], b = sh.pts[k], dx = b.x - a.x, dy = b.y - a.y, l = dx * dx + dy * dy || 1;
+    const u = Math.max(0, Math.min(1, ((t.x - a.x) * dx + (t.y - a.y) * dy) / l)), along = a.d + (b.d - a.d) * u;
+    if (t.id === sh.by && along < CONFIG.selfGrace) continue;
+    if ((a.x + dx * u - t.x) ** 2 + (a.y + dy * u - t.y) ** 2 < (TR + 2) ** 2) return true;
+  }
+  return false;
+}
+
+// ── BOTS ────────────────────────────────────────────────────────────────────────────
+/** The next cell to drive to on the shortest way from one cell to another (through the maze). */
+function nextStep(from, to) {
+  const key = (c) => c[0] + "," + c[1], prev = new Map([[key(from), null]]), q = [from];
+  while (q.length) {
+    const c = q.shift();
+    if (c[0] === to[0] && c[1] === to[1]) break;
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const n = [c[0] + dc, c[1] + dr];
+      if (passable(c[0], c[1], dc, dr) && !prev.has(key(n))) { prev.set(key(n), c); q.push(n); }
+    }
+  }
+  let c = to, steps = 0;
+  if (!prev.has(key(to))) return { cell: from, steps: 99 };
+  while (prev.get(key(c)) && key(prev.get(key(c))) !== key(from)) { c = prev.get(key(c)); steps++; }
+  return { cell: c, steps: steps + 1 };
+}
+/** Fly a test shell from the bot at angle a: the first tank it would reach (or null), and whether it comes back to the bot first. */
+function testShot(b, a, all, len) {
+  const pts = castPath(b.x, b.y, a, len, CONFIG.shellR, 4);
+  for (let s = 8; s < pts[pts.length - 1].d; s += 10) {
+    const p = pointAt(pts, s);
+    if (s > CONFIG.selfGrace && Math.hypot(p.x - b.x, p.y - b.y) < TR + 10) return { self: true };
+    for (const t of all) if (t !== b && !t.dead && Math.hypot(p.x - t.x, p.y - t.y) < TR) return { hit: t, s, bounces: pts.filter((q) => q.d < s).length - 1 };
+  }
+  return null;
+}
+/** Would a shot at angle a (all three shells of a triple) stay clear of the bot itself for its first bounces? */
+function safeShot(b, a) {
+  const len = b.pw === "L" ? CONFIG.laserLen : 800;
+  for (const ang of b.pw === "T" ? [a - CONFIG.tripleSpread, a, a + CONFIG.tripleSpread] : [a]) {
+    const pts = castPath(b.x, b.y, ang, len, CONFIG.shellR, 12);
+    for (let s = CONFIG.selfGrace; s < pts[pts.length - 1].d; s += 8) { const p = pointAt(pts, s); if (Math.hypot(p.x - b.x, p.y - b.y) < TR + 9) return false; }
+  }
+  return true;
+}
+/** The bot brain. Returns this frame's controls: { dir, mag, fire }. */
+function botControl(b, all, items, t, dt) {
+  const br = b.brain || (b.brain = { aim: null, aimUntil: 0, lineAt: 0, checkAt: 0, dodgeUntil: 0, dodgeDir: 0, goal: null, sx: b.x, sy: b.y, stuckAt: t + 1500, wiggle: 0 });
+  const ctl = { dir: b.a, mag: 0, fire: false };
+  // 1. a shell about to hit: back off sideways
+  if (t < br.dodgeUntil) return { dir: br.dodgeDir, mag: 1, fire: false };
+  for (const s of shells) {
+    if (s.k === "L" || s.gone || (s.by === b.id && s.s < CONFIG.selfGrace) || s.dodgedBy === b.id) continue;
+    const p = pointAt(s.pts, s.s), q = pointAt(s.pts, s.s + CONFIG.shellSpeed * 0.35);
+    if (Math.hypot(q.x - b.x, q.y - b.y) < TR + 12 || Math.hypot((p.x + q.x) / 2 - b.x, (p.y + q.y) / 2 - b.y) < TR + 12) {
+      s.dodgedBy = b.id;
+      if (Math.random() < CONFIG.botDodge) { const across = Math.atan2(q.y - p.y, q.x - p.x) + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2; br.dodgeDir = across; br.dodgeUntil = t + 380; return { dir: across, mag: 1, fire: false }; }
+    }
+  }
+  const foes = all.filter((o) => o !== b && !o.dead);
+  // 2. aim: straight at someone in sight, or now and then a bank shot off the walls
+  const aiming = br.aim != null && t < br.aimUntil;
+  if (!aiming && t > br.checkAt) {
+    br.checkAt = t + 200 + Math.random() * 250;
+    let best = null;
+    for (const f of foes) {
+      if (!clearLine(b.x, b.y, f.x, f.y) || Math.hypot(f.x - b.x, f.y - b.y) > 520) continue;
+      const a = Math.atan2(f.y - b.y, f.x - b.x), r = testShot(b, a, all, 700);
+      if (r && r.hit === f) { best = a; break; }
+    }
+    if (best == null && (b.pw === "L" || Math.random() < CONFIG.botBank)) {
+      let score = -1;
+      for (let i = 0; i < 28; i++) {
+        const a = b.a + (i / 28) * Math.PI * 2, r = testShot(b, a, all, b.pw === "L" ? CONFIG.laserLen : 900);
+        if (!r || !r.hit || r.self) continue;
+        const sc = 1000 - r.s - Math.abs(Math.atan2(Math.sin(a - b.a), Math.cos(a - b.a))) * 120;
+        if (sc > score) { score = sc; best = a; }
+      }
+    }
+    if (best != null) { const aim = best + (Math.random() - 0.5) * 2 * CONFIG.botAim; if (safeShot(b, aim)) { br.aim = aim; br.aimUntil = t + 900; br.lineAt = t; } }
+  }
+  if (br.aim != null && t < br.aimUntil) {
+    const diff = Math.abs(Math.atan2(Math.sin(br.aim - b.a), Math.cos(br.aim - b.a)));
+    ctl.dir = br.aim; ctl.mag = 0;
+    if (diff < 0.06 && t - br.lineAt > CONFIG.botReact * 1000) { ctl.fire = safeShot(b, b.a); br.aim = null; br.checkAt = t + 300 + Math.random() * 400; }
+    return ctl;
+  }
+  // 3. drive: to a power-up close by, else toward the nearest tank (through the maze)
+  const here = cellOf(b.x, b.y);
+  let target = null, steps = 99;
+  for (const it of items) { const n = nextStep(here, cellOf(it[1], it[2])); if (n.steps < 4 && n.steps < steps) { steps = n.steps; target = n.cell; } }
+  if (!target) for (const f of foes) { const n = nextStep(here, cellOf(f.x, f.y)); if (n.steps < steps) { steps = n.steps; target = n.cell; } }
+  if (target) {
+    let gx = (target[0] + 0.5) * CS, gy = (target[1] + 0.5) * CS;
+    if (steps <= 1 && foes.length) { const f = foes.reduce((p, q) => (Math.hypot(q.x - b.x, q.y - b.y) < Math.hypot(p.x - b.x, p.y - b.y) ? q : p)); if (Math.hypot(f.x - b.x, f.y - b.y) < 90) { gx = b.x - (f.x - b.x); gy = b.y - (f.y - b.y); } } // too close: back off
+    ctl.dir = Math.atan2(gy - b.y, gx - b.x); ctl.mag = 0.85;
+  }
+  if (t > br.stuckAt) { // hardly moved for a while: wiggle loose
+    if (Math.hypot(b.x - br.sx, b.y - br.sy) < 12) br.wiggle = t + 600;
+    br.stuckAt = t + 1500; br.sx = b.x; br.sy = b.y;
+  }
+  if (t < br.wiggle) { ctl.dir = b.a + 1.2; ctl.mag = 1; }
+  return ctl;
+}
+
+// ── MATCH (HOST) ────────────────────────────────────────────────────────────────────
+const host = { acting: false, last: null, bots: new Map(), items: { r: "", a: [] }, itemsDirty: false, lastItems: 0, lastBots: 0, again: false };
+/** The match as state has it, or the host's own newer write that hasn't come back yet. `v` only goes up. */
+function match() {
+  const m = parseOnce("match", S.shared.match, null);
+  return host.last && isHost() && (!m || host.last.v > m.v) ? host.last : m;
+}
+function writeMatch(m) { m = { ...m, v: (match()?.v ?? 0) + 1 }; host.last = m; net.setShared("match", JSON.stringify(m)); return m; }
+const roundKey = (m) => (m ? m.id + ":" + m.round : "");
+const humansHere = () => livePlayers().filter((id) => !(ATTRACT && id === me.id) && (id === me.id || S.entities.players[id]?.n));
+/** Power-ups lying in the maze this round. */
+function itemsNow() {
+  const key = roundKey(match()), I = host.acting ? host.items : parseOnce("items", S.shared.items, null);
+  return I && I.r === key && Array.isArray(I.a) ? I.a : [];
+}
+function adopt() {
+  host.acting = true; host.last = null; host.bots.clear();
+  for (const b of parseOnce("bots", S.shared.bots, [])) host.bots.set(b.id, Object.assign(newTank(b.id), { name: b.n, color: b.c, x: b.x, y: b.y, a: b.a, tx: b.x, ty: b.y,
+    dead: b.d, kb: b.kb || "", r: b.r, shots: b.sh || 0, pw: b.pw || "", pn: b.pn || 0, shieldUntil: b.sd ? Date.now() + 4000 : 0, sd: b.sd || 0 }));
+  const I = parseOnce("items", S.shared.items, null);
+  host.items = I && Array.isArray(I.a) ? { r: I.r, a: I.a.slice() } : { r: "", a: [] };
+}
+function makeBot(seatIds) {
+  const used = new Set([...seatIds.map(nameOf), ...[...host.bots.values()].map((b) => b.name)]);
+  const colors = new Set([...humansHere().map(colorOf), ...[...host.bots.values()].map((b) => b.color)]);
+  const id = "b" + Math.random().toString(36).slice(2, 6), b = Object.assign(newTank(id), { name: BOT_NAMES.find((n) => !used.has(n)) || "Bot", color: COLORS.find((c) => !colors.has(c)) || "#ccc" });
+  host.bots.set(id, b);
+  return id;
+}
+/** Seats for a new round: people still here keep theirs (a bot carries on for anyone who left),
+ *  someone waiting takes a bot's seat (or a new seat, up to maxSeats), and bots fill the rest. */
+function fitSeats(prev) {
+  const humans = humansHere(), seats = prev ? [...prev.seats] : [], wins = {}, kills = {};
+  for (let i = 0; i < seats.length; i++) {
+    const id = seats[i];
+    if (host.bots.has(id) || humans.includes(id)) continue;
+    seats[i] = makeBot(seats); if (prev) wins[seats[i]] = prev.wins[id] || 0;
+  }
+  const waiting = humans.filter((h) => !seats.includes(h));
+  for (let i = 0; i < seats.length && waiting.length; i++) if (host.bots.has(seats[i])) { host.bots.delete(seats[i]); seats[i] = waiting.shift(); }
+  while (waiting.length && seats.length < CONFIG.maxSeats) seats.push(waiting.shift());
+  while (seats.length < CONFIG.seats) seats.push(makeBot(seats));
+  for (const id of [...host.bots.keys()]) if (!seats.includes(id)) host.bots.delete(id);
+  const names = {};
+  for (const id of seats) { names[id] = nameOf(id); if (prev) { wins[id] ??= prev.wins[id] || 0; kills[id] = prev.kills[id] || 0; } }
+  return { seats, names, wins, kills };
+}
+const newSeed = () => 1 + Math.floor(Math.random() * 2e9);
+function newMatch(id, prev) {
+  return { id, phase: "intro", round: 1, seed: newSeed(), ...fitSeats(prev ? { ...prev, wins: {}, kills: {} } : null), out: [], ko: {},
+    startAt: Date.now() + CONFIG.introMs, endsAt: 0, lastAt: 0, itemAt: 0, rw: null, winner: null };
+}
+function nextRound(m) {
+  return { ...m, ...fitSeats(m), phase: "intro", round: m.round + 1, seed: newSeed(), out: [], ko: {}, startAt: Date.now() + CONFIG.introMs, endsAt: 0, lastAt: 0, itemAt: 0, rw: null };
+}
+/** What this host knows about a tank's death this round (null = still rolling). */
+function deathOf(m, id) {
+  if (id === me.id) return me.dead && me.r === roundKey(m) ? me : null;
+  if (host.bots.has(id)) { const b = host.bots.get(id); return b.dead ? b : null; }
+  if (!stillHere(id)) return { kb: "" };
+  const p = parseOnce("p:" + id, S.entities.players[id]?.p, null);
+  return p && p.r === roundKey(m) && p.d ? { kb: p.kb || "" } : null;
+}
+function spawnItem() {
+  const used = [...host.items.a.map((it) => cellOf(it[1], it[2]).join()), ...tanks().map((t) => cellOf(t.x, t.y).join())];
+  const free = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (!used.includes(c + "," + r)) free.push([c, r]);
+  if (!free.length || host.items.a.length >= CONFIG.maxItems) return;
+  const [c, r] = free[Math.floor(Math.random() * free.length)], kinds = Object.keys(POWERS);
+  host.items.a.push(["i" + Math.random().toString(36).slice(2, 6), (c + 0.5) * CS, (r + 0.5) * CS, kinds[Math.floor(Math.random() * kinds.length)]]);
+  host.itemsDirty = true;
+}
+/** Is `who` (as this host sees them) within reach of (x, y)? Generous: their latest update may still be on its way. */
+function nearEnough(who, x, y) { const t = tanks().find((a) => a.id === who); return !t || Math.hypot(x - t.x, y - t.y) < 70; }
+function hostPick(who, id) {
+  const i = host.items.a.findIndex((it) => it[0] === id);
+  if (i < 0 || !nearEnough(who, host.items.a[i][1], host.items.a[i][2])) return;
+  const [it] = host.items.a.splice(i, 1); host.itemsDirty = true;
+  const t = who === me.id ? me : host.bots.get(who);
+  if (t) gainPower(t, it[3]); else net.send("got", { to: who, k: it[3], r: host.items.r });
+}
+function hostTick(dt, now) {
+  if (!host.acting) adopt();
+  let m = match();
+  const t = Date.now();
+  if (!m) m = writeMatch(newMatch(1, null));
+  useMaze(m.seed);
+  if (host.items.r !== roundKey(m)) { host.items = { r: roundKey(m), a: [] }; host.itemsDirty = true; }
+  if (m.phase === "intro" && humansHere().some((id) => !m.seats.includes(id)) && (m.seats.some((id) => host.bots.has(id)) || m.seats.length < CONFIG.maxSeats)) m = writeMatch({ ...m, ...fitSeats(m) }); // joined during the intro: in now
+  if (m.phase === "intro" && t >= m.startAt) m = writeMatch({ ...m, phase: "fight", endsAt: t + CONFIG.roundMs, itemAt: t + CONFIG.itemFirstMs });
+  if (m.phase === "fight") {
+    let { out, ko, kills, lastAt } = m, changed = false;
+    for (const id of m.seats) { // who went down since the last tick (from their own `p`, or the host's bots)
+      if (out.includes(id)) continue;
+      const d = deathOf(m, id);
+      if (!d) continue;
+      out = [...out, id]; ko = { ...ko, [id]: d.kb }; changed = true;
+      if (d.kb && d.kb !== id && m.seats.includes(d.kb)) kills = { ...kills, [d.kb]: (kills[d.kb] || 0) + 1 };
+    }
+    const alive = m.seats.filter((id) => !out.includes(id));
+    if (alive.length <= 1 && !lastAt) { lastAt = t; changed = true; }
+    if (changed) m = writeMatch({ ...m, out, ko, kills, lastAt });
+    if ((lastAt && t - lastAt >= CONFIG.lastStandMs) || t >= m.endsAt) { // one tick decides it: nobody left = a draw
+      const rw = lastAt && alive.length === 1 ? alive[0] : "draw", wins = { ...m.wins };
+      if (rw !== "draw") wins[rw] = (wins[rw] || 0) + 1;
+      m = writeMatch({ ...m, phase: "end", rw, wins, endsAt: t + CONFIG.endMs });
+    } else if (t >= m.itemAt) { spawnItem(); m = writeMatch({ ...m, itemAt: t + CONFIG.itemEveryMs * (0.7 + Math.random() * 0.6) }); }
+  } else if (m.phase === "end" && t >= m.endsAt) {
+    const champ = m.seats.find((id) => (m.wins[id] || 0) >= CONFIG.winRounds);
+    m = writeMatch(champ ? { ...m, phase: "over", winner: champ, endsAt: t + CONFIG.resultsMs } : nextRound(m));
+  } else if (m.phase === "over" && (t >= m.endsAt || host.again)) m = writeMatch(newMatch(m.id + 1, m));
+  host.again = false;
+  useMaze(m.seed);
+  // the bots play (the host steps them here, from its own copy)
+  const all = tanks(), key = roundKey(m), items = itemsNow();
+  m.seats.forEach((id, seat) => {
+    const b = host.bots.get(id);
+    if (!b) return;
+    if (b.r !== key) { resetTank(b, m, seat); b.brain = null; }
+    if (b.dead || m.phase !== "fight") return;
+    if (b.shieldUntil && b.shieldUntil < t) { b.shieldUntil = 0; b.sd = 0; }
+    const ctl = botControl(b, all, items, now, dt);
+    stepTank(b, ctl, dt, all);
+    if (ctl.fire) { const list = fire(b, key); if (list) net.send("shot", { by: b.id, r: key, s: list }); }
+    touchItems(b, (iid) => hostPick(b.id, iid));
+  });
+  if (host.itemsDirty && now - host.lastItems > 120) { net.setShared("items", JSON.stringify(host.items)); host.itemsDirty = false; host.lastItems = now; }
+  if (now - host.lastBots > 100) { // ~10/s, one message for every bot
+    host.lastBots = now;
+    net.setShared("bots", JSON.stringify(m.seats.filter((id) => host.bots.has(id)).map((id) => { const b = host.bots.get(id); return { id, n: b.name, c: b.color, ...wire(b) }; })));
+  }
+}
+
+// ── ME ──────────────────────────────────────────────────────────────────────────────
+const myName = (() => { try { return localStorage.getItem("mpa-name") || ""; } catch { return ""; } })() ||
+  ["Major", "Lucky", "Rapid", "Sneaky", "Iron", "Captain"][Math.floor(Math.random() * 6)] + " " + ["Tread", "Shell", "Turret", "Gears", "Bolt", "Piston"][Math.floor(Math.random() * 6)];
+const me = Object.assign(newTank(""), { name: myName, color: COLORS[0], lastSend: 0, shownFor: -1 });
+const keys = new Set(), pressed = new Set(); // held keys, and presses not handled yet
+const pending = new Map();                   // power-ups I asked the host for: id -> when
+let shake = 0;
+/** The wire shape of a tank: my `p`, or one bot in `bots`. */
+const wire = (t) => ({ r: t.r, x: +t.x.toFixed(1), y: +t.y.toFixed(1), a: +t.a.toFixed(3), d: t.dead, kb: t.kb, sh: t.shots, pw: t.pw, pn: t.pn, sd: t.shieldUntil > Date.now() ? 1 : 0 });
+const botView = (id) => (host.acting ? host.bots.get(id) : null) || parseOnce("bots", S.shared.bots, []).find((b) => b.id === id);
+const colorOf = (id) => (id === me.id ? me.color : S.entities.players?.[id]?.c || botView(id)?.color || botView(id)?.c || "#ccc");
+const nameOf = (id) => (id === me.id ? myName : S.entities.players?.[id]?.n || botView(id)?.name || botView(id)?.n || match()?.names?.[id] || "Tank");
+/** A person whose tab closed without leaving: still in state for a while, but not live. Not drawn. */
+const gone = (id) => id !== me.id && !!S.entities.players[id] && !livePlayers().includes(id);
+/** Everyone seated this round as this screen shows them: me, the host's bots, or everyone else's eased view. */
+function tanks() {
+  const m = match(), out = [];
+  if (!m) return out;
+  for (const id of m.seats) {
+    if (id === me.id) out.push(me);
+    else if (host.acting && host.bots.has(id)) out.push(host.bots.get(id));
+    else if (!gone(id) && views.has(id)) out.push(views.get(id));
+  }
+  return out;
+}
+function gainPower(t, k) {
+  if (!POWERS[k]) return;
+  if (k === "S") { t.shieldUntil = Date.now() + CONFIG.shieldMs; t.sd = 1; }
+  else { t.pw = k; t.pn = k === "T" ? CONFIG.tripleShots : 1; }
+  rings.push({ x: t.x, y: t.y, t: 0, color: POWERS[k].color });
+  spark(t.x, t.y, POWERS[k].color, 12);
+  if (t === me) { sfx("pick"); toast = { text: POWERS[k].name + "!", color: POWERS[k].color, at: performance.now() }; publish(true); }
+}
+function myControl() {
+  const has = (...ks) => ks.some((k) => keys.has(k));
+  const ctl = { turn: (has("arrowright", "d") ? 1 : 0) - (has("arrowleft", "a") ? 1 : 0), drive: (has("arrowup", "w") ? 1 : 0) - (has("arrowdown", "s") ? 1 : 0) };
+  if (thumb.on && Math.hypot(thumb.dx, thumb.dy) > 12) { ctl.dir = Math.atan2(thumb.dy, thumb.dx) - (view.rot ? Math.PI / 2 : 0); ctl.mag = Math.min(1, Math.hypot(thumb.dx, thumb.dy) / 40); }
+  ctl.fire = [" ", "enter", "f", "pad:fire", "mouse"].some((k) => pressed.has(k));
+  pressed.clear();
+  return ctl;
+}
+/** Driving over a power-up: ask the host for it (or take it, on the host). */
+function touchItems(t, pick) {
+  if (t.dead) return;
+  const now = performance.now();
+  for (const [id, x, y] of itemsNow()) if (!(now - (pending.get(id) ?? -1e9) < 500) && Math.hypot(x - t.x, y - t.y) < TR + 10) { pending.set(id, now); pick(id); }
+}
+function myTick(dt, m) {
+  const seat = m.seats.indexOf(me.id), key = roundKey(m);
+  if (seat < 0) { pressed.clear(); return; } // watching this round
+  if (me.r !== key) { resetTank(me, m, seat); publish(true); }
+  if (me.shieldUntil && me.shieldUntil < Date.now()) { me.shieldUntil = 0; me.sd = 0; publish(true); }
+  if (me.dead || m.phase !== "fight") { pressed.clear(); publish(false); return; }
+  const ctl = myControl();
+  stepTank(me, ctl, dt, tanks());
+  if (ctl.fire) { const list = fire(me, key); if (list) { net.send("shot", { by: me.id, r: key, s: list }); publish(true); } }
+  touchItems(me, (id) => (host.acting ? hostPick(me.id, id) : (publish(true), net.send("pick", { id, r: key }))));
+  publish(false);
+}
+function publish(force) {
+  const now = performance.now();
+  if (!force && now - me.lastSend < 66) return; // ~15/s
+  me.lastSend = now;
+  net.me.set("p", JSON.stringify(wire(me)));
+}
+/** Two people in one color (or a bot has mine): the one with the higher sessionId picks a free color. */
+function fixColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
+  const botColors = (host.acting ? [...host.bots.values()].map((b) => b.color) : parseOnce("bots", S.shared.bots, []).map((b) => b.c));
+  if (!others.some(([id, p]) => p.c === me.color && id < net.sessionId) && !botColors.includes(me.color)) return;
+  const taken = new Set([...others.map(([, p]) => p.c), ...botColors]), free = COLORS.find((c) => !taken.has(c));
+  if (free) { me.color = free; net.me.set("c", free); }
+}
+
+// ── VIEWS ───────────────────────────────────────────────────────────────────────────
+// Everyone else (and, off the host, the bots): eased toward their latest state.
+const views = new Map();
+function syncViews(dt, m) {
+  const k = 1 - Math.pow(0.0005, dt), seen = new Set(), key = roundKey(m);
+  for (const id of m.seats) {
+    if (id === me.id || (host.acting && host.bots.has(id))) continue;
+    const bot = S.entities.players[id] ? null : parseOnce("bots", S.shared.bots, []).find((b) => b.id === id);
+    const raw = bot || S.entities.players[id]?.p, f = bot || parseOnce("p:" + id, raw, null);
+    if (!f || typeof f.x !== "number") continue;
+    seen.add(id);
+    let v = views.get(id);
+    if (!v) { v = Object.assign(newTank(id), { x: f.x, y: f.y, a: f.a, tx: f.x, ty: f.y, raw: null }); views.set(id, v); }
+    if (raw !== v.raw) { // a fresh update
+      const dead = f.r === key ? f.d : 0;
+      if (dead && !v.dead && v.r === key) boomFx(v.x, v.y, colorOf(id));
+      if (f.sh !== v.shots) v.shotAt = performance.now();
+      Object.assign(v, { gx: f.x, gy: f.y, ga: f.a, dead, kb: f.kb, r: f.r, shots: f.sh, pw: f.pw || "", pn: f.pn || 0, sd: f.sd, shieldUntil: f.sd ? Date.now() + 1e6 : 0, color: colorOf(id), name: nameOf(id), raw });
+      if (Math.hypot(v.gx - v.x, v.gy - v.y) > 60) { v.x = v.gx; v.y = v.gy; v.a = v.ga; } // a new round's spawn: jump there
+    }
+    const ox = v.x, oy = v.y;
+    v.x += (v.gx - v.x) * k; v.y += (v.gy - v.y) * k;
+    v.a += Math.atan2(Math.sin(v.ga - v.a), Math.cos(v.ga - v.a)) * k;
+    if (Math.hypot(v.x - v.tx, v.y - v.ty) > 7 && !v.dead) { treads.push({ x: v.x, y: v.y, a: v.a, at: performance.now() }); if (treads.length > 700) treads.shift(); v.tx = v.x; v.ty = v.y; }
+    v.speed = Math.hypot(v.x - ox, v.y - oy) / Math.max(dt, 0.001);
+  }
+  for (const id of views.keys()) if (!seen.has(id)) views.delete(id);
+}
+
+// ── DRAW ────────────────────────────────────────────────────────────────────────────
+const cv = document.getElementById("game"), ctx = cv.getContext("2d");
+const floorCanvas = document.createElement("canvas"), fx = floorCanvas.getContext("2d");
+const FS = 2; // the floor and walls are painted at 2× the world size, once per maze
+floorCanvas.width = (WW + 40) * FS; floorCanvas.height = (WH + 40) * FS;
+let W = 0, H = 0, DPR = 1, view = { s: 1, x: 0, y: 0, rot: false };
+const touchUI = matchMedia("(pointer: coarse)").matches && !ATTRACT;
+function fit() {
+  DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR;
+  const top = ATTRACT ? 14 : 58, bottom = ATTRACT ? 14 : touchUI && H > W ? 250 : 36, side = ATTRACT ? 14 : 12;
+  const rot = H > W * 1.1, w = rot ? WH : WW, h = rot ? WW : WH; // a tall screen shows the maze turned a quarter (it's wider than tall)
+  const s = Math.min((W - side * 2) / w, (H - top - bottom) / h);
+  view = { s, x: (W - w * s) / 2, y: top + (H - top - bottom - h * s) / 2, rot };
+}
+/** World point -> screen point (through the same transform draw() uses). */
+const toScreen = (x, y) => (view.rot ? { x: view.x + (WH - y) * view.s, y: view.y + x * view.s } : { x: view.x + x * view.s, y: view.y + y * view.s });
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+/** Paint the floor tiles and the walls (with a drop shadow and a lit top) for the current maze. */
+function renderFloor() {
+  const c = fx;
+  c.setTransform(FS, 0, 0, FS, 20 * FS, 20 * FS);
+  c.clearRect(-20, -20, WW + 40, WH + 40);
+  for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) { // floor tiles, a soft checker
+    c.fillStyle = (r + col) % 2 ? "#e9dfc8" : "#e2d7bd"; c.fillRect(col * CS, r * CS, CS, CS);
+    c.fillStyle = "#d6c9aa"; c.fillRect(col * CS + 14, r * CS + 14, 3, 3); c.fillRect(col * CS + CS - 17, r * CS + CS - 17, 3, 3);
+  }
+  c.fillStyle = "#00000030"; // shadows, down and to the right
+  for (const w of maze.rects) roundRect(c, w.x0 + 4, w.y0 + 5, w.x1 - w.x0, w.y1 - w.y0, 3);
+  for (const w of maze.rects) { c.fillStyle = "#3c4456"; roundRect(c, w.x0, w.y0, w.x1 - w.x0, w.y1 - w.y0, 3); }
+  for (const w of maze.rects) { c.fillStyle = "#56607a"; roundRect(c, w.x0 + 1.5, w.y0 + 1.5, w.x1 - w.x0 - 3, Math.min(w.y1 - w.y0 - 3, 3), 1.5); }
+}
+function roundRect(c, x, y, w, h, r) { c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, r) : c.rect(x, y, w, h); c.fill(); }
+function drawTank(t, now) {
+  const c = ctx, r = TR;
+  c.save(); c.translate(t.x, t.y);
+  c.fillStyle = "#00000033"; c.beginPath(); c.ellipse(3, 4, r + 2, r, 0, 0, Math.PI * 2); c.fill(); // shadow
+  c.rotate(t.a);
+  const tread = (now / 1000 * (t.speed || 0) / 3) % 6;
+  c.fillStyle = "#2b2f3a"; roundRect(c, -r, -r, r * 2, 7, 3); roundRect(c, -r, r - 7, r * 2, 7, 3); // treads
+  c.fillStyle = "#4a5060"; for (let i = -r + tread; i < r - 1; i += 6) { c.fillRect(i, -r + 1, 2, 5); c.fillRect(i, r - 6, 2, 5); }
+  c.fillStyle = shade(t.color, 0.72); roundRect(c, -r + 2, -r + 5, r * 2 - 4, r * 2 - 10, 4); // hull
+  c.fillStyle = t.color; roundRect(c, -r + 3, -r + 6, r * 2 - 7, r * 2 - 13, 3);
+  const kick = now - t.shotAt < 90 ? -3 : 0;
+  c.fillStyle = "#2b2f3a"; roundRect(c, 2 + kick, -2.5, r + 6, 5, 2); // barrel
+  c.fillStyle = t.pw ? POWERS[t.pw].color : "#5a6072"; c.fillRect(r + 4 + kick, -2.5, 4, 5);
+  c.fillStyle = shade(t.color, 0.55); c.beginPath(); c.arc(0, 0, 7, 0, Math.PI * 2); c.fill(); // turret
+  c.fillStyle = shade(t.color, 1.2); c.beginPath(); c.arc(-1.5, -1.5, 3.5, 0, Math.PI * 2); c.fill();
+  c.restore();
+  if (t.shieldUntil > Date.now()) {
+    const left = t === me || host.bots.get(t.id) === t ? t.shieldUntil - Date.now() : 9e9, blink = left < 2000 && Math.floor(now / 120) % 2;
+    if (!blink) { c.strokeStyle = POWERS.S.color; c.lineWidth = 2.5; c.globalAlpha = 0.6 + Math.sin(now / 150) * 0.2; c.beginPath(); c.arc(t.x, t.y, r + 6, 0, Math.PI * 2); c.stroke(); c.globalAlpha = 0.12; c.fillStyle = POWERS.S.color; c.fill(); c.globalAlpha = 1; }
+  }
+}
+function shade(hex, k) { const n = parseInt(hex.slice(1), 16); return `rgb(${Math.min(255, ((n >> 16) & 255) * k) | 0},${Math.min(255, ((n >> 8) & 255) * k) | 0},${Math.min(255, (n & 255) * k) | 0})`; }
+function boomFx(x, y, color) {
+  for (let i = 0; i < 34; i++) { const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 200; bits.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.4 + Math.random() * 0.6, color: ["#ffd166", "#ff7a1a", "#fff", color][i % 4], size: 2 + Math.random() * 3 }); }
+  rings.push({ x, y, t: 0, color: "#ffd166" }); scorch.push({ x, y, a: Math.random() * 6, color });
+  shake = Math.max(shake, 6); sfx("boom");
+}
+function spark(x, y, color, n) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 30 + Math.random() * 90; bits.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.15 + Math.random() * 0.25, color, size: 1.5 }); } }
+function puff(p) { for (let i = 0; i < 5; i++) bits.push({ x: p.x, y: p.y, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 40, life: 0.3, color: "#8a8170", size: 2 }); }
+const flash = [];
+function stepFx(dt) {
+  for (let i = bits.length - 1; i >= 0; i--) { const b = bits[i]; b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt; b.vx *= Math.pow(0.08, dt); b.vy *= Math.pow(0.08, dt); if (b.life <= 0) bits.splice(i, 1); }
+  for (let i = rings.length - 1; i >= 0; i--) if ((rings[i].t += dt) > 0.45) rings.splice(i, 1);
+  for (let i = flash.length - 1; i >= 0; i--) if ((flash[i].t += dt) > 0.08) flash.splice(i, 1);
+  shake *= Math.pow(0.02, dt);
+}
+function draw(m, now) {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = "#1d2029"; ctx.fillRect(0, 0, W, H);
+  const sx = (Math.random() - 0.5) * shake, sy = (Math.random() - 0.5) * shake;
+  if (view.rot) ctx.setTransform(0, DPR * view.s, -DPR * view.s, 0, DPR * (view.x + WH * view.s + sx), DPR * (view.y + sy));
+  else ctx.setTransform(DPR * view.s, 0, 0, DPR * view.s, DPR * (view.x + sx), DPR * (view.y + sy));
+  ctx.fillStyle = "#00000055"; ctx.fillRect(-6, -2, WW + 14, WH + 12);
+  ctx.drawImage(floorCanvas, -20, -20, WW + 40, WH + 40);
+  for (const s of scorch) { ctx.fillStyle = "#2a241c33"; ctx.beginPath(); ctx.arc(s.x, s.y, 22, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#2a241c44"; ctx.beginPath(); ctx.arc(s.x + 3, s.y - 2, 12, 0, Math.PI * 2); ctx.fill(); }
+  for (const tr of treads) { // tread marks fade out over 6s
+    const age = (now - tr.at) / 6000; if (age > 1) continue;
+    ctx.save(); ctx.translate(tr.x, tr.y); ctx.rotate(tr.a); ctx.fillStyle = `rgba(90,75,50,${0.16 * (1 - age)})`;
+    ctx.fillRect(-2, -TR + 1, 4, 5); ctx.fillRect(-2, TR - 6, 4, 5); ctx.restore();
+  }
+  for (const [id, x, y, k] of itemsNow()) { // power-up crates: a bobbing, glowing box with a letter
+    if (now - (pending.get(id) ?? -1e9) < 500) continue;
+    const bob = Math.sin(now / 260 + x) * 2, P = POWERS[k] || POWERS.T;
+    ctx.globalAlpha = 0.25 + Math.sin(now / 200) * 0.1; ctx.fillStyle = P.color; ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = "#2b2f3a"; roundRect(ctx, x - 12, y - 12 + bob, 24, 24, 6);
+    ctx.fillStyle = P.color; roundRect(ctx, x - 10, y - 10 + bob, 20, 20, 5);
+    ctx.fillStyle = "#2b2f3a"; ctx.font = "900 14px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(k, x, y + 1 + bob);
+  }
+  const list = tanks();
+  for (const t of list) if (t.dead && t.r === roundKey(m)) { // wrecks
+    ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.a); ctx.fillStyle = "#3a3530"; roundRect(ctx, -TR + 2, -TR + 4, TR * 2 - 4, TR * 2 - 8, 4);
+    ctx.fillStyle = shade(t.color, 0.4); roundRect(ctx, -TR + 5, -TR + 7, TR * 2 - 10, TR * 2 - 14, 3); ctx.restore();
+  }
+  for (const t of list) if (!t.dead) drawTank(t, now);
+  for (const sh of shells) { // shells with a short trail; laser beams as a glowing bouncing line
+    if (sh.gone && sh.k !== "L") continue;
+    if (sh.k === "L") {
+      const age = (now - sh.born) / CONFIG.laserMs, w = 7 * (1 - age);
+      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      for (const [lw, col, al] of [[w * 2.2, POWERS.L.color, 0.35], [w, POWERS.L.color, 0.9], [w * 0.35, "#fff", 1]]) {
+        ctx.globalAlpha = al * (1 - age); ctx.strokeStyle = col; ctx.lineWidth = Math.max(0.5, lw); ctx.beginPath();
+        sh.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.stroke();
+      }
+      ctx.globalAlpha = 1; continue;
+    }
+    for (let k = 4; k >= 1; k--) { const p = pointAt(sh.pts, Math.max(0, sh.s - k * 5)); ctx.globalAlpha = 0.12 * (5 - k); ctx.fillStyle = sh.color; ctx.beginPath(); ctx.arc(p.x, p.y, CONFIG.shellR * (1 - k * 0.15), 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    const p = pointAt(sh.pts, sh.s), life = sh.s / sh.pts[sh.pts.length - 1].d;
+    ctx.fillStyle = "#22252e"; ctx.beginPath(); ctx.arc(p.x, p.y, CONFIG.shellR + 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = life > 0.8 && Math.floor(now / 90) % 2 ? "#ff5d5d" : "#f4f1ea"; ctx.beginPath(); ctx.arc(p.x, p.y, CONFIG.shellR, 0, Math.PI * 2); ctx.fill();
+  }
+  for (const f of flash) { ctx.globalAlpha = 1 - f.t / 0.08; ctx.fillStyle = "#fff4b0"; ctx.beginPath(); ctx.arc(f.x, f.y, 7, 0, Math.PI * 2); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  for (const b of bits) { ctx.globalAlpha = Math.min(1, b.life * 3); ctx.fillStyle = b.color; ctx.fillRect(b.x - b.size / 2, b.y - b.size / 2, b.size, b.size); }
+  for (const r of rings) { ctx.globalAlpha = 1 - r.t / 0.45; ctx.strokeStyle = r.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(r.x, r.y, 8 + r.t * 90, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+  // names over tanks: "YOU" always, everyone at the start of a round
+  const showAll = m.phase === "intro" || (m.phase === "fight" && Date.now() - (m.endsAt - CONFIG.roundMs) < 2500);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); // labels are drawn upright, in screen pixels
+  if (!ATTRACT) {
+    ctx.font = "800 11px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.lineWidth = 3; ctx.strokeStyle = "#000b";
+    for (const t of list) {
+      if (t.dead || (t !== me && !showAll)) continue;
+      const label = t === me ? "YOU" : t.name || nameOf(t.id);
+      const p = toScreen(t.x, t.y), y = p.y - TR * view.s - 8;
+      ctx.strokeText(label, p.x, y); ctx.fillStyle = t === me ? "#ffd166" : "#fff"; ctx.fillText(label, p.x, y);
+    }
+  }
+  if (toast && now - toast.at < 1200 && !me.dead) { // "Laser!" over my tank
+    const k = (now - toast.at) / 1200; ctx.globalAlpha = 1 - k; ctx.font = "900 15px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.lineWidth = 4; ctx.strokeStyle = "#000c";
+    const p = toScreen(me.x, me.y), y = p.y - TR * view.s - 24 - k * 16;
+    ctx.strokeText(toast.text, p.x, y); ctx.fillStyle = toast.color; ctx.fillText(toast.text, p.x, y); ctx.globalAlpha = 1;
+  }
+}
+
+// ── HUD & RESULTS ───────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let board = null, dropped = false, announced = "", toast = null;
+const startedAt = performance.now();
+function hud(m) {
+  const t = Date.now(), seated = m.seats.includes(me.id), wn = (id) => (id === me.id ? "You" : m.names[id] || nameOf(id));
+  let msg = "";
+  if (m.phase === "intro") msg = m.startAt - t > 400 ? `ROUND ${m.round}<small>New maze · first to ${CONFIG.winRounds}</small>` : "GO!";
+  else if (m.phase === "fight" && t - (m.endsAt - CONFIG.roundMs) < 600) msg = "GO!";
+  else if (m.phase === "end") msg = m.rw === "draw" ? "DRAW!<small>Nobody made it.</small>" : m.rw === me.id ? "YOU TAKE IT!" : `${esc(wn(m.rw).toUpperCase())} TAKES IT`;
+  else if (m.phase === "over" && t < m.endsAt - CONFIG.resultsMs + 1500) msg = m.winner === me.id ? "YOU WIN!" : `${esc(wn(m.winner).toUpperCase())} WINS!`;
+  if (!ATTRACT && !msg && m.phase === "fight") {
+    if (!seated) msg = "<small>You're in next round. Watch this one!</small>";
+    else if (me.dead) msg = `<small>${me.kb === me.id ? "Your own shell got you!" : `${esc(wn(me.kb || "").replace(/^Tank$/, "Someone"))} got you.`} Last tank rolling takes the round.</small>`;
+  }
+  $("msg").innerHTML = msg;
+  if (msg !== announced) { announced = msg; if (/GO!|TAKES IT|TAKE IT|WIN/.test(msg)) sfx(/GO!/.test(msg) ? "bell" : "win"); }
+  if (ATTRACT) { for (const id of ["cards", "hint", "net"]) $(id).textContent = ""; return; }
+  const list = tanks();
+  $("cards").innerHTML = m.seats.filter((id) => !gone(id)).map((id) => {
+    const f = list.find((a) => a.id === id), out = m.out.includes(id) || (f && f.dead), w = m.wins[id] || 0, pw = f && f.pw ? `<b class="pw" style="color:${POWERS[f.pw].color}">${f.pw}</b>` : "";
+    return `<div class="pc ${out ? "out" : ""} ${id === me.id ? "me" : ""}" style="--c:${colorOf(id)}"><small>${esc(wn(id))}</small><span class="w">${"●".repeat(w)}${"○".repeat(Math.max(0, CONFIG.winRounds - w))}</span>${pw}</div>`;
+  }).join("");
+  $("hint").textContent = performance.now() - startedAt < 14000 ? (touchUI ? "Stick drives · FIRE shoots · shells bounce back at you · grab crates" : "↑↓ drive · ←→ turn · Space fire · shells bounce (and can hit you) · grab L laser, T triple, S shield") : "";
+  const n = livePlayers().length;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the match" : ""}`;
+  $("fire").hidden = $("stickHome").hidden = !touchUI || !seated;
+  if (!$("stickHome").hidden) Object.assign($("stickHome").style, { left: "90px", top: H - (H > W ? 150 : 110) + "px" });
+  const showOver = m.phase === "over" && t > m.endsAt - CONFIG.resultsMs + 1500; // "X WINS!" first, then the card
+  $("over").hidden = !showOver;
+  if (showOver) {
+    $("overTitle").textContent = m.winner === me.id ? "You win!" : `${wn(m.winner)} wins!`;
+    $("overSub").textContent = seated ? (m.winner === me.id ? `First to ${CONFIG.winRounds} rounds. Last tank rolling.` : "So close. Next match is yours.") : "";
+    const ranking = [...m.seats].sort((a, b) => (m.wins[b] || 0) - (m.wins[a] || 0) || (m.kills[b] || 0) - (m.kills[a] || 0));
+    $("results").innerHTML = ranking.map((id) => `<li class="${id === me.id ? "me" : ""}">${esc(id === me.id ? myName : m.names[id] || nameOf(id))}<span>${m.wins[id] || 0} round${m.wins[id] === 1 ? "" : "s"} · ${m.kills[id] || 0} KO</span></li>`).join("");
+    $("next").textContent = `Next match in ${Math.max(0, Math.ceil((m.endsAt - t) / 1000))}s`;
+    if (me.shownFor !== m.id) { me.shownFor = m.id; showBoard(m.winner === me.id); }
+  }
+}
+function showBoard(won) {
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li>Loading…</li>";
+  (won ? board.submit(1, "inc").catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No wins yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+$("again").onclick = () => { if (isHost()) host.again = true; else net.send("again", {}); };
+let audio = null; // made on the first tap or key (browsers block sound before that)
+function sfx(kind) {
+  if (!audio || ATTRACT) return;
+  const [f0, f1, dur, vol, type] = { shot: [520, 180, 0.08, 0.05, "square"], tick: [1500, 1100, 0.03, 0.02, "square"], laser: [1800, 200, 0.3, 0.06, "sawtooth"],
+    die: [260, 40, 0.5, 0.12, "sawtooth"], boom: [120, 30, 0.5, 0.14, "sawtooth"], pick: [620, 1240, 0.15, 0.06, "triangle"], shield: [900, 300, 0.25, 0.07, "triangle"],
+    bell: [880, 870, 0.4, 0.05, "sine"], win: [520, 1040, 0.5, 0.06, "triangle"] }[kind];
+  const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + dur);
+}
+
+// ── INPUT ───────────────────────────────────────────────────────────────────────────
+addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (["arrowleft", "arrowright", "arrowup", "arrowdown", " "].includes(k)) e.preventDefault();
+  try { audio ||= new AudioContext(); } catch {}
+  if (!e.repeat) pressed.add(k);
+  keys.add(k);
+});
+addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+addEventListener("blur", () => keys.clear());
+addEventListener("pointerdown", () => { try { audio ||= new AudioContext(); } catch {} }, { once: true });
+// Touch: a thumb stick wherever the left thumb lands (point the way to drive), and Fire on the right. A mouse click fires too.
+const thumb = { on: false, id: -1, x0: 0, y0: 0, dx: 0, dy: 0 };
+cv.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  if (e.pointerType === "mouse") { pressed.add("mouse"); return; }
+  if (thumb.on) return;
+  if (e.clientX > innerWidth * 0.6) { pressed.add("pad:fire"); return; }
+  Object.assign(thumb, { on: true, id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0 });
+  Object.assign($("stick").style, { left: e.clientX + "px", top: e.clientY + "px" }); $("stick").hidden = false;
+});
+cv.addEventListener("pointermove", (e) => {
+  if (!thumb.on || e.pointerId !== thumb.id) return;
+  let dx = e.clientX - thumb.x0, dy = e.clientY - thumb.y0; const d = Math.hypot(dx, dy);
+  if (d > 50) { dx *= 50 / d; dy *= 50 / d; }
+  thumb.dx = dx; thumb.dy = dy; $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+});
+for (const ev of ["pointerup", "pointercancel"]) addEventListener(ev, (e) => { if (thumb.on && e.pointerId === thumb.id) { thumb.on = false; thumb.dx = thumb.dy = 0; $("stick").hidden = true; } });
+const fireBtn = $("fire");
+fireBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); pressed.add("pad:fire"); fireBtn.classList.add("on"); });
+for (const ev of ["pointerup", "pointercancel", "pointerleave"]) fireBtn.addEventListener(ev, () => fireBtn.classList.remove("on"));
+document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+let last = performance.now(), lastReal = performance.now(), lastHb = 0, lastHud = 0, fxKey = "", hostHoldUntil = 0, wokeAt = -1, stateAt = 0;
+function frame(now) {
+  requestAnimationFrame(frame); // first, so one error can't stop the game
+  const real = performance.now(); // (the frame's own timestamp can be from before a long freeze ended)
+  if (real - lastReal > 1000) { host.acting = false; host.last = null; wokeAt = real; } // woke from a freeze or a background tab: someone else may have run the match meanwhile, so wait for fresh state and adopt it (never write our stale copy)
+  lastReal = real;
+  if (wokeAt >= 0 && stateAt > wokeAt) { hostHoldUntil = stateAt + 700; wokeAt = -1; }      // fresh state arrived: host again (if still lowest) 700ms later
+  let dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // never negative: the first frame can be stamped before `last`
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
+  if (isHost() && wokeAt < 0 && real >= hostHoldUntil && !dropped) hostTick(dt, real); else host.acting = false;
+  const m = match();
+  if (!m) return;
+  useMaze(m.seed);
+  if (fxKey !== roundKey(m)) { fxKey = roundKey(m); shells.length = 0; pending.clear(); }
+  syncViews(dt, m);
+  myTick(dt, m);
+  stepShells(m);
+  stepFx(dt);
+  draw(m, real);
+  if (now - lastHud > 100) { lastHud = now; hud(m); }
+}
+
+(async function start() {
+  net = await connect();
+  net.onState((st) => { S = st; stateAt = performance.now(); });
+  net.on("shot", (msg, from) => {
+    const m = match();
+    if (!msg || !m || msg.r !== roundKey(m) || !Array.isArray(msg.s)) return;
+    useMaze(m.seed);
+    const by = typeof msg.by === "string" ? msg.by : from;
+    for (const s of msg.s.slice(0, 3)) if (Array.isArray(s) && typeof s[1] === "number") addShell(s, by, msg.r);
+  });
+  net.on("pop", (msg) => { const s = shells.find((x) => x.id === msg?.id); if (s && !s.gone) { s.gone = true; if (typeof msg.x === "number") spark(msg.x, msg.y, "#fff", 8); } });
+  net.on("pick", (msg, from) => { if (host.acting && msg && msg.r === host.items.r) hostPick(from, msg.id); });
+  net.on("got", (msg) => { if (msg && msg.to === me.id && msg.r === roundKey(match())) gainPower(me, String(msg.k)); });
+  net.on("again", () => { if (host.acting) host.again = true; });
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
+  if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
+  const taken = new Set([...Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c), ...parse(S.shared.bots, []).map((b) => b.c)]);
+  me.id = net.sessionId; me.color = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+  net.me.set({ n: myName, c: me.color, hb: Date.now() });
+  if (ATTRACT) Object.assign(CONFIG, { seats: 5, winRounds: 3, introMs: 700, endMs: 1300, resultsMs: 1500, lastStandMs: 900, roundMs: 30000, itemFirstMs: 600, itemEveryMs: 2500, botReact: 0.12, botBank: 0.85, botDodge: 0.6 });
+  last = lastReal = performance.now(); // joining can take a few seconds: that's not a freeze
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

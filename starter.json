@@ -1,0 +1,21 @@
+{
+  "name": "Ricochet Tanks",
+  "genre": "arcade",
+  "dim": "2D",
+  "mode": "Versus",
+  "players": "2–6",
+  "hook": "Bank shots in a maze. Watch out for your own.",
+  "how": "Drive a tiny tank through a new maze every round. Shells bounce off the walls, and they can come back for you. Grab a laser, a triple shot or a shield. Last tank rolling takes the round; first to five wins.",
+  "controls": "Arrow keys or WASD to drive, Space to fire, or a thumb stick with a Fire button",
+  "uses": [
+    ["Leaderboard", "The players with the most match wins."],
+    ["Host-run rounds", "The host's browser calls each round, keeps score, picks the maze seed and hands out power-ups; if it leaves, the next player takes over."],
+    ["Bots", "Bots fill the empty seats: they find their way through the maze, dodge shells and sometimes bank a shot off the walls."],
+    ["Live sync", "Every tank and every bouncing shell shows up on all screens at once."]
+  ],
+  "ideas": [
+    "Add a mine you can drop behind your tank",
+    "Make the maze bigger, with more players",
+    "Give shells a trail of fire and a louder bang"
+  ]
+}
