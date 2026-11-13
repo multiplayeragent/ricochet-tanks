@@ -14,7 +14,7 @@
   .pc small { display: block; font-size: 12px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--c); }
   .pc .w { color: #ffd166; letter-spacing: 1px; font-size: 11px; } .pc .pw { margin-left: 4px; }
   .pc.out { opacity: .35; } .pc.me { background: #33384add; }
-  #msg { top: 36%; left: 0; right: 0; text-align: center; font: 900 46px/1 system-ui, sans-serif; letter-spacing: .04em; color: #ffd166; text-shadow: 3px 3px 0 #3a1d00, 0 0 18px #000a; }
+  #msg { top: 36%; left: 0; right: 0; padding: 0 12px; text-align: center; font: 900 46px/1 system-ui, sans-serif; letter-spacing: .04em; color: #ffd166; text-shadow: 3px 3px 0 #3a1d00, 0 0 18px #000a; }
   #msg small { display: block; margin-top: 10px; font: 800 16px system-ui, sans-serif; letter-spacing: 0; color: #fff; text-shadow: 2px 2px 0 #000; }
   #hint { bottom: calc(max(6px, env(safe-area-inset-bottom)) + 22px); left: 0; right: 0; padding: 0 16px; text-align: center; font-size: 13px; }
   #net { bottom: max(4px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; font-size: 12px; opacity: .75; }
@@ -32,8 +32,10 @@
   .stick { position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 2px solid #ffffff55; background: #ffffff12; pointer-events: none; }
   .stick i { position: absolute; left: 34px; top: 34px; width: 52px; height: 52px; border-radius: 50%; background: #ffffff70; }
   #stickHome { opacity: .45; }
-  @media (pointer: coarse) and (orientation: portrait) { #hint { bottom: calc(max(6px, env(safe-area-inset-bottom)) + 232px); } }
-  @media (max-width: 640px) { #msg { font-size: 36px; } .pc { min-width: 0; padding: 2px 6px 4px; } #cards { gap: 5px; padding: 0 5px; } }
+  @media (pointer: coarse) and (orientation: portrait) { #hint { bottom: calc(max(6px, env(safe-area-inset-bottom)) + 206px); } }
+  @media (max-width: 640px) { #msg { font-size: 36px; } #cards { gap: 5px; padding: 0 5px; }
+    .pc { position: relative; flex: 1 1 0; min-width: 0; max-width: 84px; padding: 2px 6px 4px; } .pc .w { font-size: min(11px, 2.3vw); letter-spacing: 0; } /* six cards still fit a phone */
+    .pc .pw { position: absolute; top: -4px; right: -3px; margin: 0; padding: 0 4px; border-radius: 7px; background: #000; font-size: 10px; line-height: 14px; } }
 </style>
 <script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
 </head>
@@ -80,8 +82,10 @@
  *     path follows from where it started and the maze, so every screen flies the same shell.
  *   - A HIT IS DECIDED BY THE ONE IT HITS: only you check shells against your own tank. Hit with
  *     a shield up, the shield pops; otherwise you're out and your `p` says who did it. Either
- *     way you send "pop" {id} so the shell vanishes everywhere. On other screens a shell just
- *     stops at whatever tank it touches. (The host decides this for bots.)
+ *     way you send "pop" {id} so the shell vanishes everywhere. On other screens a shell that
+ *     touches a tank hides for a moment and waits for that "pop"; if none comes (on their screen
+ *     it missed) it flies on. A laser beam goes through every tank on its path, so it sends no
+ *     "pop". (The host decides all this for bots.)
  *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s),
  *     worked out every frame. Only the host writes the shared fields:
  *       `match` {id, v, phase: intro|fight|end|over, round, seed, seats, names, wins, kills,
@@ -120,7 +124,9 @@ const CONFIG = {
   shellR: 3.5,           // shell radius
   maxShells: 5,          // a tank's shells on screen at once
   fireEvery: 0.22,       // seconds between shots
+  fireBuffer: 0.25,      // seconds a Fire press waits for the reload, so quick taps are not lost
   selfGrace: 30,         // px a shell must travel before it can hit the tank that fired it
+  hitWaitMs: 250,        // a shell touching someone else's tank hides this long, waiting for their screen to call the hit
   laserLen: 1500,        // px a laser beam reaches, bounces included
   laserMs: 380,          // how long the beam shows (it hits in the first 120ms)
   tripleSpread: 0.2,     // rad between the three shells of a triple shot
@@ -360,8 +366,7 @@ function kill(t, by) {
 }
 /** A shell touched t (on the screen that decides for t): the shield takes it, or t is out. */
 function takeHit(t, s, x, y) {
-  s.gone = true;
-  net.send("pop", { id: s.id, x: Math.round(x), y: Math.round(y) });
+  if (s.k !== "L") { s.gone = true; net.send("pop", { id: s.id, x: Math.round(x), y: Math.round(y) }); } // a shell stops here on every screen; a laser beam carries on
   if (t.shieldUntil > Date.now()) { t.shieldUntil = 0; t.sd = 0; rings.push({ x: t.x, y: t.y, t: 0, color: POWERS.S.color }); spark(x, y, POWERS.S.color, 14); if (t === me) { sfx("shield"); publish(true); } return; }
   kill(t, s.by);
 }
@@ -373,7 +378,7 @@ const shells = [], bits = [], rings = [], treads = [], scorch = [];
 function addShell([id, x, y, a, k], by, key) {
   if (shells.some((s) => s.id === id) || !maze) return;
   const laser = k === "L", pts = castPath(+x, +y, +a, laser ? CONFIG.laserLen : CONFIG.shellSpeed * CONFIG.shellLife, laser ? 1 : CONFIG.shellR);
-  shells.push({ id: String(id), by: String(by), k: laser ? "L" : "n", pts, born: performance.now(), r: key, s: 0, gone: false, color: colorOf(by), bounces: pts.length - 2 });
+  shells.push({ id: String(id), by: String(by), k: laser ? "L" : "n", pts, born: performance.now(), r: key, s: 0, gone: false, hidAt: -1e9, hit: new Set(), color: colorOf(by), bounces: pts.length - 2 });
   if (laser) { sfx("laser"); shake = Math.max(shake, 4); } else { sfx("shot"); flash.push({ x: +x + Math.cos(+a) * 18, y: +y + Math.sin(+a) * 18, t: 0 }); }
 }
 /** Move every shell to where it should be now, and check the tanks this screen decides for. */
@@ -384,7 +389,7 @@ function stepShells(m) {
     if (sh.r !== key) { shells.splice(i, 1); continue; }
     const age = (now - sh.born) / 1000;
     if (sh.k === "L") { // a beam: lethal at once, gone soon after
-      if (!sh.gone && age < 0.12) for (const t of all) if (decides(t) && !t.dead && laserHits(sh, t)) takeHit(t, sh, t.x, t.y);
+      if (age < 0.12) for (const t of all) if (decides(t) && !t.dead && !sh.hit.has(t.id) && laserHits(sh, t)) { sh.hit.add(t.id); takeHit(t, sh, t.x, t.y); } // once per tank: a shield stops it
       if (age * 1000 > CONFIG.laserMs) shells.splice(i, 1);
       continue;
     }
@@ -397,9 +402,10 @@ function stepShells(m) {
       if (t.dead || (t.id === sh.by && s1 < CONFIG.selfGrace)) continue;
       const r2 = (TR + CONFIG.shellR - 1) ** 2, hit = [p0, pm, p1].find((p) => (p.x - t.x) ** 2 + (p.y - t.y) ** 2 < r2);
       if (!hit) continue;
-      if (decides(t)) takeHit(t, sh, hit.x, hit.y);
-      else { sh.gone = true; spark(hit.x, hit.y, "#fff", 6); } // someone else's tank: their screen decides
-      break;
+      if (decides(t)) { takeHit(t, sh, hit.x, hit.y); break; }
+      // someone else's tank: their screen decides. Hide the shell while it waits for their "pop"; if they stay quiet (it missed them), it flies on.
+      if (now - sh.hidAt > CONFIG.hitWaitMs) spark(hit.x, hit.y, "#fff", 6);
+      sh.hidAt = now;
     }
   }
 }
@@ -647,7 +653,7 @@ function hostTick(dt, now) {
 // ── ME ──────────────────────────────────────────────────────────────────────────────
 const myName = (() => { try { return localStorage.getItem("mpa-name") || ""; } catch { return ""; } })() ||
   ["Major", "Lucky", "Rapid", "Sneaky", "Iron", "Captain"][Math.floor(Math.random() * 6)] + " " + ["Tread", "Shell", "Turret", "Gears", "Bolt", "Piston"][Math.floor(Math.random() * 6)];
-const me = Object.assign(newTank(""), { name: myName, color: COLORS[0], lastSend: 0, shownFor: -1 });
+const me = Object.assign(newTank(""), { name: myName, color: COLORS[0], lastSend: 0, shownFor: -1, wantFire: -1e9 });
 const keys = new Set(), pressed = new Set(); // held keys, and presses not handled yet
 const pending = new Map();                   // power-ups I asked the host for: id -> when
 let shake = 0;
@@ -699,7 +705,8 @@ function myTick(dt, m) {
   if (me.dead || m.phase !== "fight") { pressed.clear(); publish(false); return; }
   const ctl = myControl();
   stepTank(me, ctl, dt, tanks());
-  if (ctl.fire) { const list = fire(me, key); if (list) { net.send("shot", { by: me.id, r: key, s: list }); publish(true); } }
+  if (ctl.fire) me.wantFire = performance.now(); // a press during the reload still counts for a moment
+  if (performance.now() - me.wantFire < CONFIG.fireBuffer * 1000 && me.cd <= 0) { me.wantFire = -1e9; const list = fire(me, key); if (list) { net.send("shot", { by: me.id, r: key, s: list }); publish(true); } }
   touchItems(me, (id) => (host.acting ? hostPick(me.id, id) : (publish(true), net.send("pick", { id, r: key }))));
   publish(false);
 }
@@ -756,7 +763,7 @@ let W = 0, H = 0, DPR = 1, view = { s: 1, x: 0, y: 0, rot: false };
 const touchUI = matchMedia("(pointer: coarse)").matches && !ATTRACT;
 function fit() {
   DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR;
-  const top = ATTRACT ? 14 : 58, bottom = ATTRACT ? 14 : touchUI && H > W ? 250 : 36, side = ATTRACT ? 14 : 12;
+  const top = ATTRACT ? 14 : 58, bottom = ATTRACT ? 14 : touchUI && H > W ? 250 : 52, side = ATTRACT ? 14 : 12;
   const rot = H > W * 1.1, w = rot ? WH : WW, h = rot ? WW : WH; // a tall screen shows the maze turned a quarter (it's wider than tall)
   const s = Math.min((W - side * 2) / w, (H - top - bottom) / h);
   view = { s, x: (W - w * s) / 2, y: top + (H - top - bottom - h * s) / 2, rot };
@@ -835,7 +842,8 @@ function draw(m, now) {
     ctx.globalAlpha = 0.25 + Math.sin(now / 200) * 0.1; ctx.fillStyle = P.color; ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
     ctx.fillStyle = "#2b2f3a"; roundRect(ctx, x - 12, y - 12 + bob, 24, 24, 6);
     ctx.fillStyle = P.color; roundRect(ctx, x - 10, y - 10 + bob, 20, 20, 5);
-    ctx.fillStyle = "#2b2f3a"; ctx.font = "900 14px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(k, x, y + 1 + bob);
+    ctx.fillStyle = "#2b2f3a"; ctx.font = "900 14px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.save(); ctx.translate(x, y + bob); if (view.rot) ctx.rotate(-Math.PI / 2); ctx.fillText(k, 0, 1); ctx.restore(); // the letter stays upright on a turned (tall) screen
   }
   const list = tanks();
   for (const t of list) if (t.dead && t.r === roundKey(m)) { // wrecks
@@ -843,8 +851,13 @@ function draw(m, now) {
     ctx.fillStyle = shade(t.color, 0.4); roundRect(ctx, -TR + 5, -TR + 7, TR * 2 - 10, TR * 2 - 14, 3); ctx.restore();
   }
   for (const t of list) if (!t.dead) drawTank(t, now);
+  if (me.pw === "L" && !me.dead && m.phase === "fight" && list.includes(me)) { // carrying a laser: a faint line shows where the beam will go (it bounces, and it can come back for you)
+    ctx.strokeStyle = POWERS.L.color; ctx.globalAlpha = 0.4; ctx.lineWidth = 1.5; ctx.setLineDash([5, 7]); ctx.beginPath();
+    castPath(me.x, me.y, me.a, CONFIG.laserLen, 1).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
   for (const sh of shells) { // shells with a short trail; laser beams as a glowing bouncing line
-    if (sh.gone && sh.k !== "L") continue;
+    if ((sh.gone || now - sh.hidAt < CONFIG.hitWaitMs) && sh.k !== "L") continue;
     if (sh.k === "L") {
       const age = (now - sh.born) / CONFIG.laserMs, w = 7 * (1 - age);
       ctx.lineJoin = "round"; ctx.lineCap = "round";
@@ -894,11 +907,13 @@ function hud(m) {
   let msg = "";
   if (m.phase === "intro") msg = m.startAt - t > 400 ? `ROUND ${m.round}<small>New maze · first to ${CONFIG.winRounds}</small>` : "GO!";
   else if (m.phase === "fight" && t - (m.endsAt - CONFIG.roundMs) < 600) msg = "GO!";
-  else if (m.phase === "end") msg = m.rw === "draw" ? "DRAW!<small>Nobody made it.</small>" : m.rw === me.id ? "YOU TAKE IT!" : `${esc(wn(m.rw).toUpperCase())} TAKES IT`;
+  else if (m.phase === "end") msg = m.rw === "draw" ? `DRAW!<small>${m.out.length < m.seats.length ? "Time ran out." : "Nobody made it."}</small>` : m.rw === me.id ? "YOU TAKE IT!" : `${esc(wn(m.rw).toUpperCase())} TAKES IT`;
   else if (m.phase === "over" && t < m.endsAt - CONFIG.resultsMs + 1500) msg = m.winner === me.id ? "YOU WIN!" : `${esc(wn(m.winner).toUpperCase())} WINS!`;
   if (!ATTRACT && !msg && m.phase === "fight") {
-    if (!seated) msg = "<small>You're in next round. Watch this one!</small>";
+    const left = m.endsAt - t, hurry = left < 10000 && !m.lastAt ? `Draw in ${Math.max(0, Math.ceil(left / 1000))}s. ` : ""; // the last 10 seconds of a round
+    if (!seated) msg = `<small>${hurry}You're in next round. Watch this one!</small>`;
     else if (me.dead) msg = `<small>${me.kb === me.id ? "Your own shell got you!" : `${esc(wn(me.kb || "").replace(/^Tank$/, "Someone"))} got you.`} Last tank rolling takes the round.</small>`;
+    else if (hurry) msg = `<small>${hurry}</small>`;
   }
   $("msg").innerHTML = msg;
   if (msg !== announced) { announced = msg; if (/GO!|TAKES IT|TAKE IT|WIN/.test(msg)) sfx(/GO!/.test(msg) ? "bell" : "win"); }
