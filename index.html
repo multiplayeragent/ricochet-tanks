@@ -23,6 +23,7 @@
   .card { box-sizing: border-box; width: min(380px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #282c38; border: 2px solid #ffffff26; text-align: center; }
   .card h2 { margin: 0 0 4px; font-size: 28px; color: #ffd166; } .card h3 { margin: 14px 0 4px; font-size: 13px; color: #8fd8ff; text-align: left; }
   .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; }
+  .card li.note { list-style: none; margin-left: -24px; } /* a status line, not a numbered entry */
   .card li span { float: right; font-variant-numeric: tabular-nums; opacity: .85; } .card li.me { color: #ffd166; font-weight: 700; }
   .card p { margin: 10px 0 0; font-size: 13px; opacity: .75; }
   button.go { width: 100%; min-height: 48px; margin-top: 16px; border: 0; border-radius: 12px; background: #ffd166; color: #3a2400; font: 800 17px system-ui, sans-serif; cursor: pointer; }
@@ -51,7 +52,7 @@
 <div id="over" hidden><div class="card">
   <h2 id="overTitle"></h2><div id="overSub"></div>
   <h3>This match</h3><ol id="results"></ol>
-  <h3>Most match wins</h3><ol id="board"><li>Loading…</li></ol>
+  <h3>Most match wins</h3><ol id="board"><li class="note">Loading…</li></ol>
   <button class="go" id="again">Play again</button><p id="next"></p>
 </div></div>
 <script>
@@ -941,11 +942,11 @@ function hud(m) {
 }
 function showBoard(won) {
   const list = $("board");
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
-  list.innerHTML = "<li>Loading…</li>";
+  if (!board) { list.innerHTML = "<li class='note'>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li class='note'>Loading…</li>";
   (won ? board.submit(1, "inc").catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No wins yet. Be the first.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li class='note'>No wins yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li class='note'>Couldn't load the leaderboard.</li>"; });
 }
 $("again").onclick = () => { if (isHost()) host.again = true; else net.send("again", {}); };
 let audio = null; // made on the first tap or key (browsers block sound before that)
@@ -975,12 +976,13 @@ addEventListener("pointerdown", () => { try { audio ||= new AudioContext(); } ca
 const thumb = { on: false, id: -1, x0: 0, y0: 0, dx: 0, dy: 0 };
 cv.addEventListener("pointerdown", (e) => {
   e.preventDefault();
-  if (e.pointerType === "mouse") { pressed.add("mouse"); return; }
+  if (e.pointerType === "mouse") { if (e.button === 0) pressed.add("mouse"); return; }
   if (thumb.on) return;
   if (e.clientX > innerWidth * 0.6) { pressed.add("pad:fire"); return; }
   Object.assign(thumb, { on: true, id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0 });
   Object.assign($("stick").style, { left: e.clientX + "px", top: e.clientY + "px" }); $("stick").hidden = false;
 });
+cv.addEventListener("contextmenu", (e) => e.preventDefault());
 cv.addEventListener("pointermove", (e) => {
   if (!thumb.on || e.pointerId !== thumb.id) return;
   let dx = e.clientX - thumb.x0, dy = e.clientY - thumb.y0; const d = Math.hypot(dx, dy);
